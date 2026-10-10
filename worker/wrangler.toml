@@ -1,0 +1,8 @@
+name = "plan-zajec-scan"
+main = "scan-worker.js"
+compatibility_date = "2025-01-01"
+
+# Zmienne z tego pliku zastępują te ustawione w panelu przy każdym wdrożeniu.
+# ALLOWED_ORIGIN to sam adres strony (bez ścieżki repozytorium), np. https://login.github.io
+[vars]
+ALLOWED_ORIGIN = "https://TWOJ-LOGIN.github.io"
