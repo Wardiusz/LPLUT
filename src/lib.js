@@ -1,4 +1,5 @@
-export const DAYS = ['Poniedziałek', 'Wtorek', 'Środa', 'Czwartek', 'Piątek', 'Sobota', 'Niedziela'];
+import { tr, I } from './i18n.js';
+
 export const LS = 'plan-zjazdy-v1';
 // Terminy zjazdów z kalendarza uczelni (semestr zimowy 2026/27) — używane, gdy plan ma 10 zjazdów.
 export const ZD = ['2026-10-03', '2026-10-10', '2026-10-24', '2026-11-07', '2026-11-14', '2026-11-28', '2026-12-05', '2026-12-19', '2027-01-16', '2027-01-23'];
@@ -12,7 +13,7 @@ const TR = ['05.10 06.10 07.10 01.10 02.10', '12.10 13.10 14.10 08.10 09.10', '1
 export const TM = {};
 TR.forEach((r, i) => r.split(' ').forEach((x, k) => { const [d, mo] = x.split('.'); TM[`${+mo < 9 ? 2027 : 2026}-${mo}-${d}`] = { day: k + 1, n: i + 1 }; }));
 const TK = Object.keys(TM).sort(), TM_START = TK[0], TM_END = TK[TK.length - 1], TM_UNTIL = '2027-02-28';
-export const EMPTY = { ev: [], meta: { title: 'Plan zajęć', group: '' }, zj: [], ds: false, ts: 0 };
+export const EMPTY = { ev: [], meta: { title: '', group: '' }, zj: [], ds: false, ts: 0 };
 
 // ---- daty i czas
 export const m = (t) => { const [a, b] = t.split(':'); return +a * 60 + +b; };
@@ -20,7 +21,7 @@ export const iso = (d) => ((d.getDay() + 6) % 7) + 1;
 export const ymd = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 export const pd = (s) => { const [a, b, c] = s.split('-'); return new Date(+a, b - 1, +c); };
 export const ad = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
-export const F = (d, o) => d.toLocaleDateString('pl-PL', o);
+export const F = (d, o) => d.toLocaleDateString(I.lang === 'en' ? 'en-GB' : 'pl-PL', o);
 export const today = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); };
 export const hue = (s) => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
 
@@ -35,7 +36,7 @@ export const norm = (o) => {
   const d = +o.day, a = String(o.start || '').match(/(\d{1,2}):(\d\d)/), b = String(o.end || '').match(/(\d{1,2}):(\d\d)/);
   if (!(d >= 1 && d <= 7) || !a || !b) return null;
   const f = (x) => x[1].padStart(2, '0') + ':' + x[2];
-  return { day: d, start: f(a), end: f(b), type: o.type || '', weeks: String(o.weeks || ''), title: o.title || 'Zajęcia', room: o.room || '', teacher: o.teacher || '', group: o.group || '', note: o.note || '' };
+  return { day: d, start: f(a), end: f(b), type: o.type || '', weeks: String(o.weeks || ''), title: o.title || tr('classDef'), room: o.room || '', teacher: o.teacher || '', group: o.group || '', note: o.note || '' };
 };
 export const validZj = (z) => Array.isArray(z) && z.length > 0 && z.every((x) => /^\d{4}-\d\d-\d\d$/.test(x));
 const modeOf = (ev) => (ev.every((e) => e.day >= 6) ? 'zjazd' : 'tyg');
@@ -162,10 +163,10 @@ export async function directCall(img, c, note, unit = 3000) {
     : [c.model || 'gemini-3.5-flash', ...(c.fallback && c.fallback !== c.model ? [c.fallback] : [])];
   let first;
   for (let mi = 0; mi < models.length; mi++) {
-    if (mi && note) note('Przełączam na model zapasowy…');
+    if (mi && note) note(tr('fallbackSw'));
     let last;
     for (let a = 0; a < 4; a++) {
-      if (a) { if (note) note(`Dostawca jest przeciążony. Ponawiam (${a}/3)…`); await sleep(a * unit); }
+      if (a) { if (note) note(tr('retrying', { a })); await sleep(a * unit); }
       try { return await once(img, c, models[mi]); } catch (e) {
         last = e;
         if (!(e && TRANSIENT.includes(e.status))) { if (mi && first) throw first; throw e; }
@@ -189,15 +190,10 @@ export async function readPlan(f, sm, note) {
   if (!r.ok) { let j = {}; try { j = await r.json(); } catch { /* brak treści */ } throw { code: 'http' + r.status, err: j.error }; }
   return r.json();
 }
-const ERR = {
-  not_granted: 'Odczyt wymaga zgody na użycie Claude — zezwól i spróbuj ponownie.', rate_limited: 'Za dużo zapytań. Spróbuj za chwilę.',
-  image_rejected: 'Nie mogę przetworzyć tego pliku. Użyj PNG, JPG lub WebP.', invalid_json: 'Odpowiedź była niepełna. Spróbuj jeszcze raz.',
-  nourl: 'Nie ustawiono usługi skanowania.', nokey: 'Nie ustawiono klucza API.', badkey: 'Dostawca odrzucił klucz API. Sprawdź klucz oraz ewentualne ograniczenia domeny.', http403: 'Zły kod dostępu do usługi skanowania.', http429: 'Za dużo zapytań do usługi skanowania.',
-  http503: 'Model dostawcy jest chwilowo przeciążony (503). Spróbuj za kilka minut albo ustaw model zapasowy w Plan → Skanowanie obrazu.',
-};
+const ERR = { not_granted: 'eNotGranted', rate_limited: 'eRate', image_rejected: 'eImage', invalid_json: 'eJson', nourl: 'eNoUrl', nokey: 'eNoKey', badkey: 'eBadKey', http403: 'e403', http429: 'e429', http503: 'e503' };
 export function scanError(e) {
-  if (e && e.err === 'provider_unavailable') return 'Wybrany dostawca nie ma klucza w usłudze skanowania. Zmień dostawcę lub dodaj klucz.';
-  return ERR[e && e.code] || (e && /^http/.test(e.code || '') ? `Usługa skanowania zwróciła błąd (${e.code.slice(4)}${e.err ? ': ' + e.err : ''}).`
-    : e instanceof TypeError ? 'Brak połączenia z usługą skanowania. Sprawdź internet, adres usługi i ustawienia CORS.'
-    : 'Nie udało się odczytać planu. Spróbuj ostrzejszego zrzutu całej tabeli.');
+  if (e && e.err === 'provider_unavailable') return tr('eProvider');
+  if (e && ERR[e.code]) return tr(ERR[e.code]);
+  if (e && /^http/.test(e.code || '')) return tr('eHttp', { c: e.code.slice(4), d: e.err ? ': ' + e.err : '' });
+  return e instanceof TypeError ? tr('eNet') : tr('eGeneric');
 }

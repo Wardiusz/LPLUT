@@ -1,4 +1,5 @@
-import { DAYS, m, hue, ad, iso, ymd, today } from './lib.js';
+import { m, hue, ad, iso, ymd, today } from './lib.js';
+import { tr, dayList } from './i18n.js';
 
 const P = 1.15; // px na minutę
 
@@ -16,7 +17,7 @@ export function Grid({ cols, t0, t1, now, onEdit }) {
   const hm = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
   const y = (nm - t0) * P;
   return (
-    <div className="tg" style={{ '--hh': 60 * P + 'px' }}>
+    <div className="tg" style={{ '--hh': 60 * P + 'px', ...(cols.length >= 5 && { '--mw': '112px' }) }}>
       <div className="ax">
         <div className="ch" />
         <div className="ab" style={{ height: H }}>
@@ -37,7 +38,7 @@ export function Grid({ cols, t0, t1, now, onEdit }) {
                   {e.room && <span>{e.room}</span>}
                   <span className="t">{e.teacher}</span>
                   {e.note && <span className="t">{e.note}</span>}
-                  <span className="t">tyg. {e.weeks}</span>
+                  <span className="t">{tr('wk')} {e.weeks}</span>
                 </div>
               );
             })}
@@ -54,7 +55,7 @@ export function Month({ cur, model, label, onPick }) {
   const n = Math.ceil((iso(f) - 1 + new Date(f.getFullYear(), f.getMonth() + 1, 0).getDate()) / 7) * 7;
   return (
     <div className="mg">
-      {DAYS.map((d) => <div className="dh" key={d}>{d.slice(0, 3)}</div>)}
+      {dayList().map((d) => <div className="dh" key={d}>{d.slice(0, 3)}</div>)}
       {Array.from({ length: n }, (_, i) => {
         const d = ad(st, i), L = model.loc(d), ev = L ? [...L.ev].sort((a, b) => m(a.start) - m(b.start)) : [];
         return (
