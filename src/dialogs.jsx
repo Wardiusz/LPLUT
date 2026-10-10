@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { DAYS, m, norm, SC, saveSC, ymd, pd, ad } from './lib.js';
+import { DAYS, m, norm, SC, saveSC, scanMode, scanReady, ymd, pd, ad } from './lib.js';
 
 // <dialog> sterowany właściwością `open`; zawartość montuje się tylko przy otwarciu.
 export function Modal({ open, onClose, children }) {
@@ -10,10 +10,10 @@ export function Modal({ open, onClose, children }) {
 
 export function PlanDialog({ plan, sm, onScan, onAdd, onImport, onClose }) {
   const [js, setJs] = useState(''), [pe, setPe] = useState('');
-  const [c, setC] = useState(() => ({ url: '', code: '', prov: 'auto', ...SC() }));
+  const [c, setC] = useState(() => { const s = SC(); return { prov: 'gemini', key: '', model: '', url: '', code: '', ...s, mode: scanMode(s) }; });
   const svc = useRef();
-  useEffect(() => { if (svc.current && !SC().url) svc.current.open = true; }, []);
-  const scan = () => (sm || SC().url ? onScan() : setPe('Najpierw ustaw usługę skanowania albo dodaj zajęcia ręcznie.'));
+  useEffect(() => { if (svc.current && !scanReady()) svc.current.open = true; }, []);
+  const scan = () => (sm || scanReady() ? onScan() : setPe('Najpierw ustaw klucz API lub usługę skanowania i kliknij Zapisz albo dodaj zajęcia ręcznie.'));
   const exp = () => {
     const j = JSON.stringify({ title: plan.meta.title, group: plan.meta.group, zj: plan.zj, events: plan.ev }, null, 1);
     setJs(j);
@@ -42,17 +42,33 @@ export function PlanDialog({ plan, sm, onScan, onAdd, onImport, onClose }) {
       </details>
       {!sm && (
         <details ref={svc}>
-          <summary>Usługa skanowania</summary>
-          <p className="sub" style={{ margin: '4px 0' }}>Poza Claude skanowanie wymaga własnej usługi (worker/scan-worker.js).</p>
-          <div style={{ display: 'grid', gap: 6 }}>
-            <label className="sub">Dostawca AI
-              <select style={{ width: '100%', marginTop: 2 }} value={c.prov} onChange={(e) => setC({ ...c, prov: e.target.value })}>
-                <option value="auto">Auto (według kluczy w usłudze)</option><option value="claude">Claude</option><option value="gemini">Gemini</option>
+          <summary>Skanowanie obrazu (poza Claude)</summary>
+          <div style={{ display: 'grid', gap: 6, marginTop: 6 }}>
+            <label className="sub">Tryb
+              <select style={{ width: '100%', marginTop: 2 }} value={c.mode} onChange={(e) => setC({ ...c, mode: e.target.value })}>
+                <option value="direct">Bezpośrednio, z własnym kluczem API</option>
+                <option value="worker">Przez własną usługę (Worker)</option>
               </select>
             </label>
-            <input placeholder="https://…workers.dev" autoComplete="off" value={c.url} onChange={(e) => setC({ ...c, url: e.target.value })} />
-            <input type="password" placeholder="Kod dostępu" autoComplete="off" value={c.code} onChange={(e) => setC({ ...c, code: e.target.value })} />
-            <button onClick={() => { saveSC({ ...c, url: c.url.trim() }); setPe('Zapisano.'); }}>Zapisz</button>
+            <label className="sub">Dostawca AI
+              <select style={{ width: '100%', marginTop: 2 }} value={c.mode === 'direct' && c.prov === 'auto' ? 'gemini' : c.prov} onChange={(e) => setC({ ...c, prov: e.target.value })}>
+                {c.mode === 'worker' && <option value="auto">Auto (według kluczy w usłudze)</option>}
+                <option value="gemini">Gemini</option><option value="claude">Claude</option>
+              </select>
+            </label>
+            {c.mode === 'direct' ? (
+              <>
+                <input type="password" placeholder="Klucz API" autoComplete="off" value={c.key} onChange={(e) => setC({ ...c, key: e.target.value })} />
+                <input placeholder="Model (opcjonalnie)" autoComplete="off" value={c.model} onChange={(e) => setC({ ...c, model: e.target.value })} />
+                <p className="sub" style={{ margin: 0 }}>Klucz zapisuje się tylko w tej przeglądarce: nie trafia do repozytorium ani na inne urządzenia. Użyj klucza z niskim limitem.</p>
+              </>
+            ) : (
+              <>
+                <input placeholder="https://…workers.dev" autoComplete="off" value={c.url} onChange={(e) => setC({ ...c, url: e.target.value })} />
+                <input type="password" placeholder="Kod dostępu" autoComplete="off" value={c.code} onChange={(e) => setC({ ...c, code: e.target.value })} />
+              </>
+            )}
+            <button onClick={() => { saveSC({ ...c, key: c.key.trim(), url: c.url.trim(), model: c.model.trim() }); setPe('Zapisano.'); }}>Zapisz</button>
           </div>
         </details>
       )}

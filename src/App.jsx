@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { DAYS, LS, EMPTY, iso, pd, ad, F, ymd, today, norm, validZj, fixZj, buildModel, zFor, snapDay, modeOf, adopt, load, persist, cloud, SC, readPlan, scanError } from './lib.js';
+import { DAYS, LS, EMPTY, iso, pd, ad, F, ymd, today, norm, validZj, fixZj, buildModel, zFor, snapDay, modeOf, adopt, load, persist, cloud, scanReady, readPlan, scanError } from './lib.js';
 import { Grid, Month } from './views.jsx';
 import { Modal, PlanDialog, EditDialog, DatesDialog } from './dialogs.jsx';
 
@@ -68,7 +68,7 @@ export default function App() {
       applyPlan(ev, r, `Wczytano ${ev.length} bloków zajęć. Porównaj z oryginałem, zanim zaczniesz na nim polegać.`);
     } catch (e) { setMsg(scanError(e)); }
   };
-  const pickFile = () => (sm || SC().url ? file.current.click() : setDlg('plan'));
+  const pickFile = () => (sm || scanReady() ? file.current.click() : setDlg('plan'));
 
   const empty = !plan.ev.length, lab = model.mode === 'zjazd' ? 'zjazd' : 'tydz.';
   const zz = Math.min(zi, Math.max(0, model.N - 1));

@@ -98,9 +98,45 @@ async function shrink(f) {
   c.getContext('2d').drawImage(b, 0, 0, c.width, c.height);
   return c.toDataURL('image/jpeg', 0.9).split(',')[1];
 }
+export const scanMode = (c) => c.mode || (c.url ? 'worker' : 'direct');
+export const scanReady = () => { const c = SC(); return scanMode(c) === 'worker' ? !!c.url : !!c.key; };
+const pickJson = (text) => {
+  const f = (text || '').match(/\{[\s\S]*\}/); if (!f) throw { code: 'invalid_json' };
+  try { return JSON.parse(f[0]); } catch { throw { code: 'invalid_json' }; }
+};
+
+// Bezpośrednio z przeglądarki do API dostawcy. Klucz użytkownika zostaje w jego przeglądarce.
+async function direct(f, c) {
+  const img = await shrink(f), claude = c.prov === 'claude', key = c.key.trim();
+  const r = await fetch(
+    claude ? 'https://api.anthropic.com/v1/messages' : `https://generativelanguage.googleapis.com/v1beta/models/${c.model || 'gemini-3.5-flash'}:generateContent`,
+    {
+      method: 'POST',
+      headers: claude
+        ? { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true', 'content-type': 'application/json' }
+        : { 'x-goog-api-key': key, 'content-type': 'application/json' },
+      body: JSON.stringify(claude
+        ? { model: c.model || 'claude-sonnet-5-5', max_tokens: 8000, messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: img } }, { type: 'text', text: PROMPT }] }] }
+        : { contents: [{ parts: [{ inline_data: { mime_type: 'image/jpeg', data: img } }, { text: PROMPT }] }], generationConfig: { responseMimeType: 'application/json' } }),
+    },
+  );
+  let j = {}; try { j = await r.json(); } catch { /* brak treści */ }
+  const msg = String((j.error && j.error.message) || '');
+  if (!r.ok) {
+    if ([400, 401, 403].includes(r.status) && /key|auth|permission|referer/i.test(msg)) throw { code: 'badkey' };
+    throw { code: 'http' + r.status, err: msg.slice(0, 140) };
+  }
+  const text = claude
+    ? (j.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('')
+    : ((j.candidates && j.candidates[0] && j.candidates[0].content.parts) || []).map((p) => p.text || '').join('');
+  return pickJson(text);
+}
+
 export async function readPlan(f, sm) {
   if (sm) return sm.json(PROMPT, { images: [f], modelTier: 'default' });
-  const c = SC(); if (!c.url) throw { code: 'nourl' };
+  const c = SC();
+  if (scanMode(c) === 'direct') { if (!c.key) throw { code: 'nokey' }; return direct(f, c); }
+  if (!c.url) throw { code: 'nourl' };
   const r = await fetch(c.url, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-access-code': c.code || '' },
@@ -112,11 +148,11 @@ export async function readPlan(f, sm) {
 const ERR = {
   not_granted: 'Odczyt wymaga zgody na użycie Claude — zezwól i spróbuj ponownie.', rate_limited: 'Za dużo zapytań. Spróbuj za chwilę.',
   image_rejected: 'Nie mogę przetworzyć tego pliku. Użyj PNG, JPG lub WebP.', invalid_json: 'Odpowiedź była niepełna. Spróbuj jeszcze raz.',
-  nourl: 'Nie ustawiono usługi skanowania.', http403: 'Zły kod dostępu do usługi skanowania.', http429: 'Za dużo zapytań do usługi skanowania.',
+  nourl: 'Nie ustawiono usługi skanowania.', nokey: 'Nie ustawiono klucza API.', badkey: 'Dostawca odrzucił klucz API. Sprawdź klucz oraz ewentualne ograniczenia domeny.', http403: 'Zły kod dostępu do usługi skanowania.', http429: 'Za dużo zapytań do usługi skanowania.',
 };
 export function scanError(e) {
   if (e && e.err === 'provider_unavailable') return 'Wybrany dostawca nie ma klucza w usłudze skanowania. Zmień dostawcę lub dodaj klucz.';
-  return ERR[e && e.code] || (e && /^http/.test(e.code || '') ? `Usługa skanowania zwróciła błąd (${e.code.slice(4)}).`
-    : e instanceof TypeError ? 'Brak połączenia z usługą skanowania. Sprawdź adres i ustawienie dozwolonego adresu strony (CORS).'
+  return ERR[e && e.code] || (e && /^http/.test(e.code || '') ? `Usługa skanowania zwróciła błąd (${e.code.slice(4)}${e.err ? ': ' + e.err : ''}).`
+    : e instanceof TypeError ? 'Brak połączenia z usługą skanowania. Sprawdź internet, adres usługi i ustawienia CORS.'
     : 'Nie udało się odczytać planu. Spróbuj ostrzejszego zrzutu całej tabeli.');
 }
