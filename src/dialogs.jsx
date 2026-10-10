@@ -68,7 +68,14 @@ export function PlanDialog({ plan, sm, onScan, onAdd, onImport, onClose }) {
                 <input type="password" placeholder="Kod dostępu" autoComplete="off" value={c.code} onChange={(e) => setC({ ...c, code: e.target.value })} />
               </>
             )}
-            <button onClick={() => { saveSC({ ...c, key: c.key.trim(), url: c.url.trim(), model: c.model.trim() }); setPe('Zapisano.'); }}>Zapisz</button>
+            <button onClick={() => {
+              const url = c.url.trim(), key = c.key.trim();
+              if (c.mode === 'worker' && !/^https:\/\//.test(url)) { setPe('Adres usługi musi zaczynać się od https://.'); return; }
+              if (c.mode === 'worker' && /(gemini|aistudio)\.google\.com|anthropic\.com/.test(url)) { setPe('To adres strony dostawcy, a nie usługi skanowania. Wybierz tryb „Bezpośrednio” i wklej tylko klucz API.'); return; }
+              if (c.mode === 'direct' && !key) { setPe('Wklej klucz API.'); return; }
+              saveSC({ ...c, key, url, model: c.model.trim() });
+              setPe(c.mode === 'direct' && c.prov !== 'claude' && !key.startsWith('AIza') ? 'Zapisano. Uwaga: klucze Gemini zwykle zaczynają się od „AIza”. Skopiuj go z aistudio.google.com/apikey.' : 'Zapisano.');
+            }}>Zapisz</button>
           </div>
         </details>
       )}
@@ -109,13 +116,13 @@ export function EditDialog({ ev, onSave, onDelete, onClose }) {
   );
 }
 
-export function DatesDialog({ plan, onSave, onDelete, onClose }) {
+export function DatesDialog({ plan, mode, onSave, onDelete, onClose }) {
   const [z, setZ] = useState(plan.zj), [step, setStep] = useState(7), [sure, setSure] = useState(false);
   const fill = () => { if (!z[0]) return; const a = pd(z[0]); setZ(z.map((_, i) => ymd(ad(a, i * (+step || 7))))); };
   return (
     <>
-      <b>Terminy zjazdów</b>
-      <p className="sub" style={{ margin: '4px 0' }}>Data pierwszego dnia każdego zjazdu (sobota). Dopasuj do harmonogramu uczelni.</p>
+      <b>{mode === 'zjazd' ? 'Terminy zjazdów' : 'Tygodnie semestru'}</b>
+      <p className="sub" style={{ margin: '4px 0' }}>{mode === 'zjazd' ? 'Data pierwszego dnia każdego zjazdu (sobota). Dopasuj do harmonogramu uczelni.' : 'Data poniedziałku każdego tygodnia semestru.'}</p>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         Co <input type="number" min="1" max="60" style={{ width: 64 }} value={step} onChange={(e) => setStep(e.target.value)} /> dni od 1. terminu <button onClick={fill}>Wypełnij</button>
       </div>

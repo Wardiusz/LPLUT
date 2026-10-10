@@ -18,6 +18,7 @@ export default function App() {
   const [all, setAll] = useState(!!ui().a);
   const [theme, setTheme] = useState(() => { try { return localStorage.getItem(LS + ':theme') || 'auto'; } catch { return 'auto'; } });
   const model = useMemo(() => buildModel(plan), [plan]);
+  const tyg = model.mode === 'tyg', v = tyg && view === 'zjazd' ? 'week' : view; // plan dzienny nie ma widoku zjazdu
   const [zi, setZi] = useState(() => zFor(plan.zj, model.span, today()));
   const [cur, setCur] = useState(today);
   const [dlg, setDlg] = useState(null); // 'plan' | 'dates' | { i } (edycja bloku, i = -1 dla nowego)
@@ -35,7 +36,7 @@ export default function App() {
     if (theme === 'auto') delete r.dataset.theme; else r.dataset.theme = theme;
     try { localStorage.setItem(LS + ':theme', theme); } catch { /* */ }
   }, [theme]);
-  useEffect(() => { if (view === 'day') setCur((c) => snapDay(model, c)); }, []); // eslint-disable-line
+  useEffect(() => { if (v === 'day') setCur((c) => snapDay(model, c)); }, []); // eslint-disable-line
 
   // Odczyt obrazu przez Claude i synchronizacja z kontem — tylko wewnątrz claude.ai.
   useEffect(() => {
@@ -57,7 +58,7 @@ export default function App() {
   }, []);
 
   const applyPlan = (ev, r, text) => {
-    const p = commit({ ...plan, ev, meta: { title: r.title || 'Plan zajęć', group: r.group || '' }, ...(validZj(r.zj) ? { zj: r.zj, ds: true } : {}) });
+    const p = commit({ ...plan, ev, tm: undefined, meta: { title: r.title || 'Plan zajęć', group: r.group || '' }, ...(validZj(r.zj) ? { zj: r.zj, ds: true } : {}) });
     setView('zjazd'); jump(p); setMsg(text);
   };
   const scan = async (f) => {
@@ -74,12 +75,12 @@ export default function App() {
   const zz = Math.min(zi, Math.max(0, model.N - 1));
   const dcol = (d) => {
     const L = model.loc(d);
-    return { h1: DAYS[iso(d) - 1], h2: F(d, { day: 'numeric', month: 'long' }) + (L ? ` · ${lab} ${L.n}` : ''), ev: L ? L.ev : [], td: ymd(d) === ymd(today()) };
+    return { h1: DAYS[iso(d) - 1], h2: F(d, { day: 'numeric', month: 'long' }) + (L ? ` · ${lab} ${L.n}${L.day !== iso(d) ? ' · jak ' + DAYS[L.day - 1].toLowerCase() : ''}` : ''), ev: L ? L.ev : [], td: ymd(d) === ymd(today()) };
   };
   const step = (n) => {
-    if (view === 'zjazd') setZi(Math.min(model.N - 1, Math.max(0, zz + n)));
-    else if (view === 'day') { const c = model.classDays(), t = n > 0 ? c.find((d) => d > cur) : [...c].reverse().find((d) => d < cur); setCur(t || ad(cur, n)); }
-    else if (view === 'week') setCur(ad(cur, 7 * n));
+    if (v === 'zjazd') setZi(Math.min(model.N - 1, Math.max(0, zz + n)));
+    else if (v === 'day') { const c = model.classDays(), t = n > 0 ? c.find((d) => d > cur) : [...c].reverse().find((d) => d < cur); setCur(t || ad(cur, n)); }
+    else if (v === 'week') setCur(ad(cur, 7 * n));
     else setCur(new Date(cur.getFullYear(), cur.getMonth() + n, 1));
   };
   const goView = (v) => { setView(v); if (v === 'day') setCur((c) => snapDay(model, c)); };
@@ -88,7 +89,7 @@ export default function App() {
   let nav = null, body = null;
   if (!empty) {
     const arrows = <><button aria-label="Wstecz" onClick={() => step(-1)}>‹</button><button aria-label="Dalej" onClick={() => step(1)}>›</button></>;
-    if (view === 'zjazd') {
+    if (v === 'zjazd') {
       const b = pd(plan.zj[zz]);
       nav = <>{arrows}
         <select aria-label="Zjazd" value={zz} onChange={(e) => setZi(+e.target.value)}>
@@ -96,17 +97,17 @@ export default function App() {
         </select>
         <span className="lbl">{F(b, { day: 'numeric' })}–{F(ad(b, model.span - 1), { day: 'numeric', month: 'long' })}</span></>;
       body = grid(Array.from({ length: model.span }, (_, o) => dcol(ad(b, o))));
-    } else if (view === 'day') {
+    } else if (v === 'day') {
       const L = model.loc(cur), nx = model.classDays().find((d) => d > cur);
       nav = <>{arrows}<input type="date" aria-label="Data" value={ymd(cur)} onChange={(e) => e.target.value && setCur(pd(e.target.value))} />
         <span className="lbl">{F(cur, { weekday: 'long', day: 'numeric', month: 'long' })}</span></>;
       body = L && L.ev.length ? grid([dcol(cur)])
         : <div className="empty">Brak zajęć w tym dniu.{nx && <><br /><br /><button onClick={() => setCur(nx)}>Najbliższe zajęcia: {F(nx, { weekday: 'long', day: 'numeric', month: 'long' })}</button></>}</div>;
-    } else if (view === 'week') {
-      const mo = ad(cur, 1 - iso(cur)), used = new Set(model.ev.map((e) => e.day));
-      const cs = [0, 1, 2, 3, 4, 5, 6].filter((k) => all || used.has(k + 1)).map((k) => dcol(ad(mo, k)));
+    } else if (v === 'week') {
+      const mo = ad(cur, 1 - iso(cur)), used = new Set(model.ev.map((e) => e.day)), full = all || tyg;
+      const cs = [0, 1, 2, 3, 4, 5, 6].filter((k) => full || used.has(k + 1)).map((k) => dcol(ad(mo, k)));
       nav = <>{arrows}<span className="lbl">{F(mo, { day: 'numeric', month: 'short' })} – {F(ad(mo, 6), { day: 'numeric', month: 'short', year: 'numeric' })}</span>
-        <label><input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> cały tydzień</label></>;
+        {!tyg && <label><input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> cały tydzień</label>}</>;
       body = <>{!cs.some((c) => c.ev.length) && <div className="empty" style={{ marginBottom: 12 }}>W tym tygodniu nie ma zajęć.</div>}{grid(cs)}</>;
     } else {
       nav = <>{arrows}<span className="lbl">{F(new Date(cur.getFullYear(), cur.getMonth(), 1), { month: 'long', year: 'numeric' })}</span></>;
@@ -122,7 +123,7 @@ export default function App() {
           <div className="sub">{empty ? 'Brak planu' : [plan.meta.group, plan.ev.length + ' bloków zajęć'].filter(Boolean).join(' · ')}</div></div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button onClick={() => setDlg('plan')}>Plan</button>
-          {!empty && <button onClick={() => setDlg('dates')}>Terminy zjazdów</button>}
+          {!empty && !(tyg && plan.tm) && <button onClick={() => setDlg('dates')}>{tyg ? 'Tygodnie semestru' : 'Terminy zjazdów'}</button>}
           <span className="seg" role="group" aria-label="Motyw">
             {[['auto', 'Auto'], ['light', 'Jasny'], ['dark', 'Ciemny']].map(([v, t]) => <button key={v} className={theme === v ? 'on' : ''} aria-pressed={theme === v} onClick={() => setTheme(v)}>{t}</button>)}
           </span>
@@ -136,9 +137,9 @@ export default function App() {
           <button className="on" onClick={pickFile}>Wybierz obraz planu</button> <button onClick={() => setDlg({ i: -1 })}>Dodaj ręcznie</button> <button onClick={() => setDlg('plan')}>Więcej opcji</button></div>
       ) : (
         <>
-          {!plan.ds && <div className="hint">Daty zjazdów są domyślne (co 7 dni od najbliższej soboty). Ustaw prawdziwe w „Terminy zjazdów”, żeby widoki dnia, tygodnia i miesiąca pokazywały właściwe zajęcia.</div>}
+          {!plan.ds && <div className="hint">{tyg ? 'Daty tygodni są domyślne (od poniedziałku bieżącego tygodnia). Ustaw prawdziwe w „Tygodnie semestru”, żeby widoki pokazywały właściwe zajęcia.' : 'Daty zjazdów są domyślne (co 7 dni od najbliższej soboty). Ustaw prawdziwe w „Terminy zjazdów”, żeby widoki dnia, tygodnia i miesiąca pokazywały właściwe zajęcia.'}</div>}
           <div className="tabs">
-            {[['zjazd', model.mode === 'zjazd' ? 'Zjazd' : 'Tydzień zajęć'], ['day', 'Dzień'], ['week', 'Tydzień'], ['month', 'Miesiąc']].map(([v, t]) => <button key={v} className={view === v ? 'on' : ''} onClick={() => goView(v)}>{t}</button>)}
+            {[['zjazd', model.mode === 'zjazd' ? 'Zjazd' : 'Tydzień zajęć'], ['day', 'Dzień'], ['week', 'Tydzień'], ['month', 'Miesiąc']].filter(([k]) => !(tyg && k === 'zjazd')).map(([k, t]) => <button key={k} className={v === k ? 'on' : ''} onClick={() => goView(k)}>{t}</button>)}
           </div>
           <div className="bar">{nav}<span className="sp" /><button onClick={() => { setCur(today()); setZi(zFor(plan.zj, model.span, today())); }}>Dziś</button></div>
           <main>{body}</main>
@@ -151,7 +152,7 @@ export default function App() {
           onImport={(ev, r) => { setDlg(null); applyPlan(ev, r, `Zaimportowano ${ev.length} bloków zajęć.`); }} />
       </Modal>
       <Modal open={dlg === 'dates'} onClose={() => setDlg((d) => (d === 'dates' ? null : d))}>
-        <DatesDialog plan={plan} onClose={() => setDlg(null)}
+        <DatesDialog plan={plan} mode={model.mode} onClose={() => setDlg(null)}
           onSave={(zj) => { const p = commit({ ...plan, zj, ds: true }); jump(p); setDlg(null); }}
           onDelete={() => { commit({ ...EMPTY }); setDlg(null); }} />
       </Modal>

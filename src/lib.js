@@ -2,6 +2,16 @@ export const DAYS = ['Poniedziałek', 'Wtorek', 'Środa', 'Czwartek', 'Piątek',
 export const LS = 'plan-zjazdy-v1';
 // Terminy zjazdów z kalendarza uczelni (semestr zimowy 2026/27) — używane, gdy plan ma 10 zjazdów.
 export const ZD = ['2026-10-03', '2026-10-10', '2026-10-24', '2026-11-07', '2026-11-14', '2026-11-28', '2026-12-05', '2026-12-19', '2027-01-16', '2027-01-23'];
+// Kalendarz terminów dla planów dziennych (semestr zimowy 2026/27): wiersz = termin t1–t15, kolumny = pn, wt, śr, czw, pt.
+// Terminy nie są tygodniami kalendarzowymi: czwartek i piątek mają inne numery niż poniedziałek, a "wirtualne" dni
+// (np. pn 09.11 liczy się jak środa) zmieniają dzień zajęć.
+const TR = ['05.10 06.10 07.10 01.10 02.10', '12.10 13.10 14.10 08.10 09.10', '19.10 20.10 21.10 15.10 16.10', '26.10 27.10 28.10 22.10 23.10',
+  '02.11 03.11 04.11 29.10 30.10', '16.11 10.11 09.11 05.11 06.11', '23.11 17.11 18.11 12.11 13.11', '30.11 24.11 25.11 19.11 20.11',
+  '07.12 01.12 02.12 26.11 27.11', '14.12 08.12 09.12 03.12 04.12', '21.12 15.12 16.12 10.12 11.12', '11.01 12.01 22.12 17.12 18.12',
+  '18.01 19.01 13.01 14.01 15.01', '25.01 26.01 20.01 21.01 22.01', '01.02 02.02 27.01 28.01 29.01'];
+export const TM = {};
+TR.forEach((r, i) => r.split(' ').forEach((x, k) => { const [d, mo] = x.split('.'); TM[`${+mo < 9 ? 2027 : 2026}-${mo}-${d}`] = { day: k + 1, n: i + 1 }; }));
+const TK = Object.keys(TM).sort(), TM_START = TK[0], TM_END = TK[TK.length - 1], TM_UNTIL = '2027-02-28';
 export const EMPTY = { ev: [], meta: { title: 'Plan zajęć', group: '' }, zj: [], ds: false, ts: 0 };
 
 // ---- daty i czas
@@ -32,35 +42,46 @@ const modeOf = (ev) => (ev.every((e) => e.day >= 6) ? 'zjazd' : 'tyg');
 export { modeOf };
 const maxW = (ev) => { const ws = ev.flatMap((e) => (/\d/.test(e.weeks || '') ? [...wk(e.weeks)] : [])); return ws.length ? Math.max(...ws) : 15; };
 
-// Uzupełnia listę terminów zjazdów tak, żeby pasowała do planu.
+// Uzupełnia i koryguje terminy tak, żeby pasowały do planu i jego trybu.
 export function fixZj(p) {
-  if (!p.ev.length) return { ...p, zj: [], ds: false };
+  if (!p.ev.length) return { ...p, zj: [], ds: false, tm: undefined };
   const N = maxW(p.ev), mode = modeOf(p.ev);
-  if (p.zj.length >= N) return p;
-  if (p.zj.length) {
-    let a = pd(p.zj[p.zj.length - 1]); const zj = [...p.zj];
+  let q = p;
+  // Terminy z poprzedniego planu o innym trybie (np. soboty dla planu dziennego) są nieaktualne.
+  const stale = mode === 'tyg' ? q.zj.some((z) => iso(pd(z)) !== 1) : q.zj.length > 0 && q.zj.every((z) => iso(pd(z)) === 1);
+  if (stale) q = { ...q, zj: [], ds: false };
+  if (mode === 'zjazd') q = { ...q, tm: undefined };
+  else if (q.tm === undefined) q = { ...q, tm: N <= 15 && ymd(today()) <= TM_UNTIL };
+  if (mode === 'tyg' && q.tm) return { ...q, zj: [], ds: true }; // daty z kalendarza uczelni (TM)
+  if (q.zj.length >= N) return q;
+  if (q.zj.length) {
+    let a = pd(q.zj[q.zj.length - 1]); const zj = [...q.zj];
     while (zj.length < N) { a = ad(a, 7); zj.push(ymd(a)); }
-    return { ...p, zj, ds: false };
+    return { ...q, zj, ds: false };
   }
-  if (mode === 'zjazd' && N === ZD.length) return { ...p, zj: [...ZD], ds: true };
+  if (mode === 'zjazd' && N === ZD.length) return { ...q, zj: [...ZD], ds: true };
   const t = today(), first = mode === 'zjazd' ? ad(t, (6 - iso(t) + 7) % 7) : ad(t, 1 - iso(t));
-  return { ...p, zj: Array.from({ length: N }, (_, i) => ymd(ad(first, i * 7))), ds: false };
+  return { ...q, zj: Array.from({ length: N }, (_, i) => ymd(ad(first, i * 7))), ds: false };
 }
 
-// Model pochodny: bloki z indeksem i zbiorem tygodni, mapowanie daty na zjazd.
+// Model pochodny: bloki z indeksem i zbiorem tygodni, mapowanie daty na zjazd lub termin.
 export function buildModel(p) {
-  const ev = p.ev.map((e, i) => ({ ...e, i, w: wk(e.weeks) })), mode = modeOf(ev), span = mode === 'zjazd' ? 2 : 7;
+  const ev = p.ev.map((e, i) => ({ ...e, i, w: wk(e.weeks) })), mode = modeOf(ev), span = mode === 'zjazd' ? 2 : 7, tm = mode === 'tyg' && !!p.tm;
   const loc = (d) => {
+    if (tm) {
+      const k = ymd(d), t = TM[k];
+      if (t) return { n: t.n, day: t.day, ev: ev.filter((e) => e.day === t.day && e.w.has(t.n)) };
+      if (k >= TM_START && k <= TM_END) return null; // dzień wolny od zajęć
+    }
     for (let i = 0; i < p.zj.length; i++) {
       const o = Math.round((d - pd(p.zj[i])) / 864e5);
-      if (o >= 0 && o < span) return { n: i + 1, ev: ev.filter((e) => e.day === iso(d) && e.w.has(i + 1)) };
+      if (o >= 0 && o < span) return { n: i + 1, day: iso(d), ev: ev.filter((e) => e.day === iso(d) && e.w.has(i + 1)) };
     }
     return null;
   };
   const classDays = () => {
-    const r = [];
-    p.zj.forEach((z) => { for (let o = 0; o < span; o++) { const d = ad(pd(z), o), L = loc(d); if (L && L.ev.length) r.push(d); } });
-    return r.sort((a, b) => a - b);
+    const base = tm ? Object.keys(TM).map(pd) : p.zj.flatMap((z) => Array.from({ length: span }, (_, o) => ad(pd(z), o)));
+    return base.filter((d) => { const L = loc(d); return L && L.ev.length; }).sort((a, b) => a - b);
   };
   const t0 = ev.length ? Math.floor(Math.min(...ev.map((e) => m(e.start))) / 60) * 60 : 0;
   const t1 = ev.length ? Math.ceil(Math.max(...ev.map((e) => m(e.end))) / 60) * 60 : 0;
@@ -73,10 +94,10 @@ export const snapDay = (model, c) => {
 };
 
 // ---- zapis lokalny i w koncie Claude (działa tylko w claude.ai)
-export const snap = (p) => ({ ev: p.ev, meta: p.meta, zj: p.zj, ds: p.ds, demo: false, zv: 2, ts: p.ts || 0 });
+export const snap = (p) => ({ ev: p.ev, meta: p.meta, zj: p.zj, ds: p.ds, demo: false, zv: 2, ts: p.ts || 0, tm: p.tm === undefined ? null : p.tm });
 export function adopt(j) {
   if (!(j && Array.isArray(j.ev)) || j.demo) return null;
-  return { ev: j.ev, meta: j.meta || EMPTY.meta, zj: Array.isArray(j.zj) ? j.zj : [], ds: !!j.ds, ts: j.ts || 0 };
+  return { ev: j.ev, meta: j.meta || EMPTY.meta, zj: Array.isArray(j.zj) ? j.zj : [], ds: !!j.ds, ts: j.ts || 0, tm: j.tm == null ? undefined : !!j.tm };
 }
 export const load = () => { try { return adopt(JSON.parse(localStorage.getItem(LS))); } catch { return null; } };
 export const persist = (p) => { try { localStorage.setItem(LS, JSON.stringify(snap(p))); } catch { /* brak dostępu do storage */ } };
@@ -98,7 +119,7 @@ async function shrink(f) {
   c.getContext('2d').drawImage(b, 0, 0, c.width, c.height);
   return c.toDataURL('image/jpeg', 0.9).split(',')[1];
 }
-export const scanMode = (c) => c.mode || (c.url ? 'worker' : 'direct');
+export const scanMode = (c) => c.mode || 'direct';
 export const scanReady = () => { const c = SC(); return scanMode(c) === 'worker' ? !!c.url : !!c.key; };
 const pickJson = (text) => {
   const f = (text || '').match(/\{[\s\S]*\}/); if (!f) throw { code: 'invalid_json' };
