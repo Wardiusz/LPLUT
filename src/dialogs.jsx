@@ -10,7 +10,7 @@ export function Modal({ open, onClose, children }) {
 
 export function PlanDialog({ plan, sm, onScan, onAdd, onImport, onClose }) {
   const [js, setJs] = useState(''), [pe, setPe] = useState('');
-  const [c, setC] = useState(() => { const s = SC(); return { prov: 'gemini', key: '', model: '', url: '', code: '', ...s, mode: scanMode(s) }; });
+  const [c, setC] = useState(() => { const s = SC(); return { prov: 'gemini', key: '', model: '', fallback: '', url: '', code: '', ...s, mode: scanMode(s) }; });
   const svc = useRef();
   useEffect(() => { if (svc.current && !scanReady()) svc.current.open = true; }, []);
   const scan = () => (sm || scanReady() ? onScan() : setPe('Najpierw ustaw klucz API lub usługę skanowania i kliknij Zapisz albo dodaj zajęcia ręcznie.'));
@@ -60,6 +60,7 @@ export function PlanDialog({ plan, sm, onScan, onAdd, onImport, onClose }) {
               <>
                 <input type="password" placeholder="Klucz API" autoComplete="off" value={c.key} onChange={(e) => setC({ ...c, key: e.target.value })} />
                 <input placeholder="Model (opcjonalnie)" autoComplete="off" value={c.model} onChange={(e) => setC({ ...c, model: e.target.value })} />
+                <input placeholder="Model zapasowy na wypadek przeciążenia (opcjonalnie)" autoComplete="off" value={c.fallback} onChange={(e) => setC({ ...c, fallback: e.target.value })} />
                 <p className="sub" style={{ margin: 0 }}>Klucz zapisuje się tylko w tej przeglądarce: nie trafia do repozytorium ani na inne urządzenia. Użyj klucza z niskim limitem.</p>
               </>
             ) : (
@@ -73,7 +74,7 @@ export function PlanDialog({ plan, sm, onScan, onAdd, onImport, onClose }) {
               if (c.mode === 'worker' && !/^https:\/\//.test(url)) { setPe('Adres usługi musi zaczynać się od https://.'); return; }
               if (c.mode === 'worker' && /(gemini|aistudio)\.google\.com|anthropic\.com/.test(url)) { setPe('To adres strony dostawcy, a nie usługi skanowania. Wybierz tryb „Bezpośrednio” i wklej tylko klucz API.'); return; }
               if (c.mode === 'direct' && !key) { setPe('Wklej klucz API.'); return; }
-              saveSC({ ...c, key, url, model: c.model.trim() });
+              saveSC({ ...c, key, url, model: c.model.trim(), fallback: c.fallback.trim() });
               setPe(c.mode === 'direct' && c.prov !== 'claude' && !key.startsWith('AIza') ? 'Zapisano. Uwaga: klucze Gemini zwykle zaczynają się od „AIza”. Skopiuj go z aistudio.google.com/apikey.' : 'Zapisano.');
             }}>Zapisz</button>
           </div>

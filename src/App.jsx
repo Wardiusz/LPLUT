@@ -64,7 +64,7 @@ export default function App() {
   const scan = async (f) => {
     setMsg('Odczytuję plan z obrazu… zwykle 20–60 s.');
     try {
-      const r = await readPlan(f, sm), ev = (r.events || []).map(norm).filter(Boolean);
+      const r = await readPlan(f, sm, setMsg), ev = (r.events || []).map(norm).filter(Boolean);
       if (!ev.length) throw { code: 'empty' };
       applyPlan(ev, r, `Wczytano ${ev.length} bloków zajęć. Porównaj z oryginałem, zanim zaczniesz na nim polegać.`);
     } catch (e) { setMsg(scanError(e)); }
@@ -73,9 +73,9 @@ export default function App() {
 
   const empty = !plan.ev.length, lab = model.mode === 'zjazd' ? 'zjazd' : 'tydz.';
   const zz = Math.min(zi, Math.max(0, model.N - 1));
-  const dcol = (d) => {
+  const dcol = (d, short) => {
     const L = model.loc(d);
-    return { h1: DAYS[iso(d) - 1], h2: F(d, { day: 'numeric', month: 'long' }) + (L ? ` · ${lab} ${L.n}${L.day !== iso(d) ? ' · jak ' + DAYS[L.day - 1].toLowerCase() : ''}` : ''), ev: L ? L.ev : [], td: ymd(d) === ymd(today()) };
+    return { h1: DAYS[iso(d) - 1], h2: F(d, { day: 'numeric', month: short ? 'short' : 'long' }) + (L ? ` · ${lab} ${L.n}${L.day !== iso(d) ? ' · jak ' + DAYS[L.day - 1].toLowerCase() : ''}` : ''), ev: L ? L.ev : [], td: ymd(d) === ymd(today()) };
   };
   const step = (n) => {
     if (v === 'zjazd') setZi(Math.min(model.N - 1, Math.max(0, zz + n)));
@@ -105,7 +105,7 @@ export default function App() {
         : <div className="empty">Brak zajęć w tym dniu.{nx && <><br /><br /><button onClick={() => setCur(nx)}>Najbliższe zajęcia: {F(nx, { weekday: 'long', day: 'numeric', month: 'long' })}</button></>}</div>;
     } else if (v === 'week') {
       const mo = ad(cur, 1 - iso(cur)), used = new Set(model.ev.map((e) => e.day)), full = all || tyg;
-      const cs = [0, 1, 2, 3, 4, 5, 6].filter((k) => full || used.has(k + 1)).map((k) => dcol(ad(mo, k)));
+      const cs = [0, 1, 2, 3, 4, 5, 6].filter((k) => full || used.has(k + 1)).map((k) => dcol(ad(mo, k), true));
       nav = <>{arrows}<span className="lbl">{F(mo, { day: 'numeric', month: 'short' })} – {F(ad(mo, 6), { day: 'numeric', month: 'short', year: 'numeric' })}</span>
         {!tyg && <label><input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> cały tydzień</label>}</>;
       body = <>{!cs.some((c) => c.ev.length) && <div className="empty" style={{ marginBottom: 12 }}>W tym tygodniu nie ma zajęć.</div>}{grid(cs)}</>;

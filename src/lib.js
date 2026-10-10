@@ -126,18 +126,21 @@ const pickJson = (text) => {
   try { return JSON.parse(f[0]); } catch { throw { code: 'invalid_json' }; }
 };
 
-// Bezpośrednio z przeglądarki do API dostawcy. Klucz użytkownika zostaje w jego przeglądarce.
-async function direct(f, c) {
-  const img = await shrink(f), claude = c.prov === 'claude', key = c.key.trim();
+const TRANSIENT = [500, 502, 503, 504];
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Jedno zapytanie bezpośrednio z przeglądarki do API dostawcy. Klucz użytkownika zostaje w jego przeglądarce.
+async function once(img, c, model) {
+  const claude = c.prov === 'claude', key = c.key.trim();
   const r = await fetch(
-    claude ? 'https://api.anthropic.com/v1/messages' : `https://generativelanguage.googleapis.com/v1beta/models/${c.model || 'gemini-3.5-flash'}:generateContent`,
+    claude ? 'https://api.anthropic.com/v1/messages' : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
     {
       method: 'POST',
       headers: claude
         ? { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true', 'content-type': 'application/json' }
         : { 'x-goog-api-key': key, 'content-type': 'application/json' },
       body: JSON.stringify(claude
-        ? { model: c.model || 'claude-sonnet-5-5', max_tokens: 8000, messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: img } }, { type: 'text', text: PROMPT }] }] }
+        ? { model, max_tokens: 8000, messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: img } }, { type: 'text', text: PROMPT }] }] }
         : { contents: [{ parts: [{ inline_data: { mime_type: 'image/jpeg', data: img } }, { text: PROMPT }] }], generationConfig: { responseMimeType: 'application/json' } }),
     },
   );
@@ -145,7 +148,7 @@ async function direct(f, c) {
   const msg = String((j.error && j.error.message) || '');
   if (!r.ok) {
     if ([400, 401, 403].includes(r.status) && /key|auth|permission|referer/i.test(msg)) throw { code: 'badkey' };
-    throw { code: 'http' + r.status, err: msg.slice(0, 140) };
+    throw { code: 'http' + r.status, status: r.status, err: msg.slice(0, 140) };
   }
   const text = claude
     ? (j.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('')
@@ -153,10 +156,30 @@ async function direct(f, c) {
   return pickJson(text);
 }
 
-export async function readPlan(f, sm) {
+// Ponawia chwilowe błędy dostawcy (np. 503 "high demand"), a potem próbuje modelu zapasowego.
+export async function directCall(img, c, note, unit = 3000) {
+  const models = c.prov === 'claude' ? [c.model || 'claude-sonnet-5-5']
+    : [c.model || 'gemini-3.5-flash', ...(c.fallback && c.fallback !== c.model ? [c.fallback] : [])];
+  let first;
+  for (let mi = 0; mi < models.length; mi++) {
+    if (mi && note) note('Przełączam na model zapasowy…');
+    let last;
+    for (let a = 0; a < 4; a++) {
+      if (a) { if (note) note(`Dostawca jest przeciążony. Ponawiam (${a}/3)…`); await sleep(a * unit); }
+      try { return await once(img, c, models[mi]); } catch (e) {
+        last = e;
+        if (!(e && TRANSIENT.includes(e.status))) { if (mi && first) throw first; throw e; }
+      }
+    }
+    first = first || last;
+  }
+  throw first;
+}
+
+export async function readPlan(f, sm, note) {
   if (sm) return sm.json(PROMPT, { images: [f], modelTier: 'default' });
   const c = SC();
-  if (scanMode(c) === 'direct') { if (!c.key) throw { code: 'nokey' }; return direct(f, c); }
+  if (scanMode(c) === 'direct') { if (!c.key) throw { code: 'nokey' }; return directCall(await shrink(f), c, note); }
   if (!c.url) throw { code: 'nourl' };
   const r = await fetch(c.url, {
     method: 'POST',
@@ -170,6 +193,7 @@ const ERR = {
   not_granted: 'Odczyt wymaga zgody na użycie Claude — zezwól i spróbuj ponownie.', rate_limited: 'Za dużo zapytań. Spróbuj za chwilę.',
   image_rejected: 'Nie mogę przetworzyć tego pliku. Użyj PNG, JPG lub WebP.', invalid_json: 'Odpowiedź była niepełna. Spróbuj jeszcze raz.',
   nourl: 'Nie ustawiono usługi skanowania.', nokey: 'Nie ustawiono klucza API.', badkey: 'Dostawca odrzucił klucz API. Sprawdź klucz oraz ewentualne ograniczenia domeny.', http403: 'Zły kod dostępu do usługi skanowania.', http429: 'Za dużo zapytań do usługi skanowania.',
+  http503: 'Model dostawcy jest chwilowo przeciążony (503). Spróbuj za kilka minut albo ustaw model zapasowy w Plan → Skanowanie obrazu.',
 };
 export function scanError(e) {
   if (e && e.err === 'provider_unavailable') return 'Wybrany dostawca nie ma klucza w usłudze skanowania. Zmień dostawcę lub dodaj klucz.';
